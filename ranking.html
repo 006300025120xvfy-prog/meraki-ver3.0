@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>ランキング | DRAW LINE RUN</title>
+  <script src="se-common.js"></script>
+  <style>
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      background-color: #111;
+      font-family: 'Helvetica Neue', 'Hiragino Sans', 'Noto Sans JP', Arial, sans-serif;
+    }
+    #game-container {
+      position: absolute;
+      width: 400px;
+      height: 700px;
+      transform-origin: center center;
+      overflow: hidden;
+      background: linear-gradient(180deg, #7ec8ff 0%, #b8e8ff 45%, #e8f6ff 100%);
+    }
+
+    /* moved to shell */
+    /* body shell */
+    .rank-screen {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      padding: 2px 12px 12px;
+      box-sizing: border-box;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      overflow: hidden;
+    }
+    .rank-bg {
+      position: absolute; inset: 0; width: 100%; height: 100%;
+      object-fit: cover; z-index: 0; pointer-events: none; display: none;
+    }
+    .rank-screen.has-bg .rank-bg { display: block; }
+    .rank-screen > *:not(.rank-bg) { position: relative; z-index: 1; }
+
+    .rank-title-wrap {
+      text-align: center;
+      flex-shrink: 0;
+      margin-bottom: 2px;
+    }
+    .rank-title-wrap img {
+      display: none;
+      width: min(200px, 65%);
+      height: auto;
+      margin: 0 auto;
+      filter: drop-shadow(0 4px 10px rgba(0,60,120,0.2));
+    }
+    .rank-title-wrap.has-img img { display: block; }
+    .rank-title-wrap.has-img .title-fallback { display: none; }
+    .title-fallback {
+      display: inline-block;
+      background: linear-gradient(180deg, #f5d78a, #e8b84a);
+      border: 4px solid #fff;
+      border-radius: 16px;
+      padding: 10px 20px 8px;
+      box-shadow: 0 4px 0 #c99000, 0 6px 14px rgba(0,0,0,0.12);
+    }
+    .title-fallback h1 {
+      margin: 0; font-size: 24px; font-weight: 900; color: #fff;
+      text-shadow: 0 2px 0 rgba(0,80,140,0.25); letter-spacing: 2px;
+    }
+    .title-fallback .sub {
+      margin-top: 2px; font-size: 11px; font-weight: 900; color: #1a6ab0;
+    }
+
+    .rank-board {
+      flex: 1;
+      min-height: 0;
+      width: 100%;
+      background: rgba(255,255,255,0.95);
+      border: 4px solid #fff;
+      border-radius: 22px;
+      box-shadow: 0 0 0 3px #5ec8ff, 0 8px 18px rgba(20,90,160,0.18);
+      padding: 10px 8px;
+      box-sizing: border-box;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    .rank-empty {
+      text-align: center;
+      color: #7a8aa0;
+      font-weight: bold;
+      padding: 28px 12px;
+      font-size: 13px;
+    }
+
+    .rank-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: linear-gradient(180deg, #fff8e0, #ffefc0);
+      border: 3px solid #f0d080;
+      border-radius: 16px;
+      padding: 10px 12px;
+      margin-bottom: 8px;
+      box-sizing: border-box;
+    }
+    .rank-item.top1 {
+      background: linear-gradient(180deg, #fff6d0, #ffe8a0);
+      border-color: #f0c040;
+      box-shadow: 0 2px 8px rgba(200,150,0,0.15);
+    }
+    .rank-item.top2 {
+      background: linear-gradient(180deg, #f0f4f8, #e4eaf0);
+      border-color: #c0c8d0;
+    }
+    .rank-item.top3 {
+      background: linear-gradient(180deg, #fff0e8, #ffe0d0);
+      border-color: #e0a080;
+    }
+    .rank-medal {
+      width: 42px; height: 42px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 900; font-size: 16px; color: #fff;
+      flex-shrink: 0;
+      background: linear-gradient(180deg, #ffd24d, #e8a800);
+      border: 3px solid #fff;
+      box-shadow: 0 2px 0 #c99000;
+    }
+    .rank-item.top2 .rank-medal {
+      background: linear-gradient(180deg, #e0e8f0, #a8b4c0);
+      box-shadow: 0 2px 0 #708090;
+    }
+    .rank-item.top3 .rank-medal {
+      background: linear-gradient(180deg, #ffb080, #e07040);
+      box-shadow: 0 2px 0 #a05030;
+    }
+    .rank-meta { flex: 1; min-width: 0; }
+    .rank-label {
+      font-weight: 900; font-size: 14px; color: #1a2a4a;
+    }
+    .rank-date {
+      font-size: 11px; color: #7a8aa0; font-weight: bold; margin-top: 1px;
+    }
+    .rank-score {
+      font-weight: 900;
+      font-size: 22px;
+      color: #1a7fd0;
+      text-shadow: 0 1px 0 #fff, 0 0 8px rgba(80,180,255,0.35);
+      flex-shrink: 0;
+      letter-spacing: 0.5px;
+    }
+
+    .rank-footer {
+      flex-shrink: 0;
+      margin-top: 8px;
+      text-align: center;
+    }
+    .rank-back {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 280px;
+      padding: 18px 36px;
+      border-radius: 999px;
+      border: 4px solid #1a4a8a;
+      background: linear-gradient(180deg, #ffe566 0%, #ffb800 100%);
+      color: #1a2a4a;
+      font-weight: 900;
+      font-size: 22px;
+      text-decoration: none;
+      box-shadow: 0 4px 0 #c99000, 0 6px 12px rgba(0,0,0,0.12);
+    }
+    .rank-back:active {
+      transform: translateY(2px);
+      box-shadow: 0 2px 0 #c99000;
+    }
+    .rank-back img {
+      display: none;
+      height: 84px;
+      width: auto;
+      max-width: 340px;
+    }
+    .rank-back.has-img {
+      background: none; border: none; box-shadow: none; padding: 0; min-width: 0;
+    }
+    .rank-back.has-img img { display: block; }
+    .rank-back.has-img .back-fallback { display: none; }
+  </style>
+</head>
+<body>
+  <div id="game-container">
+  <div class="rank-screen" id="rank-screen">
+    <img class="rank-bg" data-asset="rank_select_bg.png" alt="">
+    <div class="rank-title-wrap" id="rank-title-wrap">
+      <img data-asset="rank_title.png" alt="ランキング">
+      <div class="title-fallback">
+        <h1>🏆 ランキング</h1>
+        <div class="sub">スコアアタックの記録</div>
+      </div>
+    </div>
+
+    <div class="rank-board" id="rank-list"></div>
+
+    <div class="rank-footer">
+      <a class="rank-back" id="rank-back" href="index.html">
+        <img data-asset="rank_btn_back.png" alt="タイトルへ">
+        <span class="back-fallback">← タイトルへ</span>
+      </a>
+    </div>
+  </div>
+  </div>
+
+<script>
+  function adjustScale() {
+    const container = document.getElementById("game-container");
+    if (!container) return;
+    const designWidth = 400;
+    const designHeight = 700;
+    const scaleX = window.innerWidth / designWidth;
+    const scaleY = window.innerHeight / designHeight;
+    let scale = Math.min(scaleX, scaleY);
+    if (scale >= 1) scale = 1;
+    container.style.left = "50%";
+    container.style.top = "50%";
+    container.style.transform = "translate(-50%, -50%) scale(" + scale + ")";
+  }
+  window.addEventListener("load", adjustScale);
+  window.addEventListener("resize", adjustScale);
+</script>
+
+  <script>
+    window.__assetDirs = ["", "UI/", "ui/", "map/", "assets/", "img/"];
+    window.bindFlexibleAsset = window.bindFlexibleAsset || function (el, name) {
+      if (!el || !name) return;
+      var base = String(name).split("/").pop();
+      var list = [], seen = {};
+      function add(p) { if (p && !seen[p]) { seen[p] = 1; list.push(p); } }
+      add(name); add(base);
+      (window.__assetDirs || [""]).forEach(function (d) { add(d + base); });
+      var i = 0;
+      function tryNext() {
+        if (i >= list.length) return;
+        var url = list[i++];
+        el.onerror = function () { tryNext(); };
+        el.onload = function () {
+          if (!el.naturalWidth) return;
+          if (el.classList.contains("rank-bg")) {
+            document.getElementById("rank-screen").classList.add("has-bg");
+          }
+          if (el.getAttribute("data-asset") === "rank_title.png") {
+            document.getElementById("rank-title-wrap").classList.add("has-img");
+          }
+          if (el.parentElement && el.parentElement.id === "rank-back") {
+            el.parentElement.classList.add("has-img");
+          }
+        };
+        el.src = url;
+      }
+      tryNext();
+    };
+    document.addEventListener("DOMContentLoaded", function () {
+      document.querySelectorAll("[data-asset]").forEach(function (el) {
+        window.bindFlexibleAsset(el, el.getAttribute("data-asset"));
+      });
+    });
+
+    function formatDate(d) {
+      if (!d) return "";
+      try {
+        // already short string
+        if (typeof d === "string" && d.indexOf("/") >= 0) return d;
+        var dt = new Date(d);
+        if (isNaN(dt.getTime())) return String(d);
+        var m = dt.getMonth() + 1;
+        var day = dt.getDate();
+        var h = dt.getHours();
+        var mi = dt.getMinutes();
+        return m + "/" + day + " " + String(h).padStart(2, "0") + ":" + String(mi).padStart(2, "0");
+      } catch (e) {
+        return String(d);
+      }
+    }
+
+    function loadRanks() {
+      var el = document.getElementById("rank-list");
+      var scores = [];
+      try { scores = JSON.parse(localStorage.getItem("drawRunScores")) || []; } catch (e) {}
+      var normalized = scores.map(function (s) {
+        if (typeof s === "object" && s) return { score: Number(s.score) || 0, date: s.date || "" };
+        return { score: Number(s) || 0, date: "" };
+      }).filter(function (s) { return s.score > 0; });
+      normalized.sort(function (a, b) { return b.score - a.score; });
+      var top = normalized.slice(0, 10);
+      if (!top.length) {
+        el.innerHTML = '<div class="rank-empty">まだ記録がありません<br><small>スコアアタックに挑戦しよう！</small></div>';
+        return;
+      }
+      el.innerHTML = top.map(function (s, i) {
+        var cls = i === 0 ? "top1" : i === 1 ? "top2" : i === 2 ? "top3" : "";
+        return '<div class="rank-item ' + cls + '">' +
+          '<div class="rank-medal">' + (i + 1) + '</div>' +
+          '<div class="rank-meta">' +
+            '<div class="rank-label">記録</div>' +
+            (s.date ? '<div class="rank-date">' + formatDate(s.date) + '</div>' : '') +
+          '</div>' +
+          '<div class="rank-score">' + Math.floor(s.score) + 'm</div>' +
+        '</div>';
+      }).join("");
+    }
+    loadRanks();
+  </script>
+</body>
+</html>

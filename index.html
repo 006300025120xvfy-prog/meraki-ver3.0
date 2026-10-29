@@ -1,0 +1,2312 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>DRAW RUN</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+  <script src="se-common.js"></script>
+
+  <script>
+    // HTML素材：どのフォルダにあっても読み込む
+    window.__assetDirs = ["","map/","skin/","UI/","ui/","sound/","assets/","img/","images/","audio/"];
+    window.bindFlexibleAsset = function(el, name) {
+      if (!el || !name) return;
+      var base = String(name).split("/").pop();
+      var list = [], seen = {};
+      function add(p) { if (p && !seen[p]) { seen[p]=1; list.push(p); } }
+      add(name); add(base);
+      // よくある別名
+      if (base === "btn-survey.png") {
+        ["survey.png","btn_survey.png","アンケート.png","enquete.png","questionnaire.png"].forEach(function(a){ add(a); });
+      }
+      window.__assetDirs.forEach(function(d){
+        add(d + base);
+        if (base === "btn-survey.png") {
+          ["survey.png","btn_survey.png"].forEach(function(a){ add(d + a); });
+        }
+      });
+      var i = 0;
+      function tryNext() {
+        if (i >= list.length) {
+          // 全部失敗
+          if (el.id === "survey-btn-img" || (el.getAttribute("data-asset") === "btn-survey.png")) {
+            el.style.display = "none";
+            var p = el.parentElement;
+            if (p) p.classList.add("no-img");
+          }
+          return;
+        }
+        var url = list[i++];
+        if (el.tagName === "AUDIO" || el.tagName === "VIDEO") {
+          var onErr = function(){ el.removeEventListener("error", onErr); tryNext(); };
+          el.addEventListener("error", onErr);
+          el.src = url;
+          try { el.load(); } catch(e) {}
+        } else {
+          el.onerror = function(){ tryNext(); };
+          el.onload = function(){
+            if (!el.naturalWidth) return;
+            el.style.display = "";
+            if (el.id === "survey-btn-img") {
+              var sp = el.parentElement;
+              if (sp) sp.classList.remove("no-img");
+            }
+          };
+          el.src = url;
+        }
+      }
+      tryNext();
+    };
+    document.addEventListener("DOMContentLoaded", function() {
+      document.querySelectorAll("[data-asset]").forEach(function(el) {
+        window.bindFlexibleAsset(el, el.getAttribute("data-asset"));
+        el.addEventListener("load", function() {
+          if (!el.naturalWidth) return;
+          var p = el.parentElement;
+          if (p && (p.id === "mode-select-title" || p.id === "mode-select-subtitle" || p.id === "world-banner")) {
+            p.classList.add("has-img");
+          }
+          // タイトルロゴにサブ文言も入っている想定 → 下の文字を出さない
+          if (p && p.id === "mode-select-title") {
+            var scr = document.getElementById("mode-select-screen");
+            if (scr) scr.classList.add("title-has-logo");
+          }
+          if (el.classList.contains("map-select-bg")) {
+            var scr2 = document.getElementById("mode-select-screen");
+            if (scr2) scr2.classList.add("has-bg-img");
+          }
+          if (el.classList.contains("world-banner-img")) {
+            var b = document.getElementById("world-banner");
+            if (b) b.classList.add("has-img");
+          }
+          if (el.classList.contains("map-guide-bg")) {
+            var g = document.getElementById("map-guide-panel");
+            if (g) g.classList.add("has-img-bg");
+          }
+        });
+      });
+    });
+  </script>
+
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      background-color: #111;
+      font-family: 'Helvetica Neue', Arial, sans-serif;
+    }
+
+    #game-container {
+      position: absolute;
+      width: 400px;
+      height: 700px;
+      transform-origin: center center;
+      overflow: hidden;
+    }
+
+    #gameCanvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    #fade-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-color: #000;
+      pointer-events: none;
+      z-index: 100;
+      clip-path: circle(0% at 50% 50%);
+      transition: clip-path 0.6s ease-in-out;
+    }
+
+    #fade-overlay.fade-in {
+      clip-path: circle(150% at 50% 50%);
+    }
+
+    #fade-overlay.circle-expand {
+      clip-path: circle(150% at 50% 50%);
+      transition: clip-path 0.7s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    #gravity-warning {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 15px;
+      font-weight: bold;
+      color: #ff0080;
+      text-align: center;
+      text-shadow: 0 0 10px rgba(0, 0, 0, 0.9);
+      pointer-events: none;
+      z-index: 5;
+      white-space: nowrap;
+      transition: opacity 0.1s;
+    }
+
+    #gravity-warning.hidden {
+      opacity: 0;
+    }
+
+    #countdown-overlay {
+      display: none;
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(ellipse at center, rgba(10, 5, 30, 0.55) 0%, rgba(0, 0, 0, 0.75) 100%);
+      z-index: 19;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.35s ease;
+    }
+    #countdown-overlay.visible {
+      display: block;
+      opacity: 1;
+    }
+
+    #countdown-display {
+      display: none;
+      position: absolute;
+      top: 42%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      z-index: 20;
+      pointer-events: none;
+      text-align: center;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+    }
+    #countdown-display.visible {
+      display: flex;
+    }
+
+    #countdown-number {
+      font-size: 92px;
+      font-weight: 900;
+      line-height: 1;
+      color: #fff;
+      letter-spacing: 2px;
+      text-shadow:
+        0 0 12px rgba(255, 0, 128, 0.95),
+        0 0 40px rgba(255, 0, 128, 0.55),
+        0 4px 0 rgba(0, 0, 0, 0.35);
+      animation: cd-pop 0.55s cubic-bezier(0.22, 1.2, 0.36, 1) both;
+    }
+    #countdown-number.cd-3 { color: #ff6b9d; }
+    #countdown-number.cd-2 { color: #ffc14d; }
+    #countdown-number.cd-1 { color: #5cffb0; }
+    #countdown-number.cd-go {
+      color: #00ffe0;
+      font-size: 78px;
+      letter-spacing: 6px;
+      text-shadow:
+        0 0 16px rgba(0, 255, 224, 0.95),
+        0 0 48px rgba(0, 200, 255, 0.65),
+        0 4px 0 rgba(0, 0, 0, 0.35);
+      animation: cd-go 0.7s cubic-bezier(0.22, 1.2, 0.36, 1) both;
+    }
+
+    #countdown-ring {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 140px;
+      height: 140px;
+      margin: -70px 0 0 -70px;
+      border-radius: 50%;
+      border: 3px solid rgba(255, 255, 255, 0.15);
+      box-shadow: 0 0 0 0 rgba(255, 0, 128, 0.45);
+      animation: cd-ring 0.9s ease-out both;
+      pointer-events: none;
+      z-index: 19;
+      display: none;
+    }
+    #countdown-ring.visible { display: block; }
+
+    #countdown-sub {
+      font-size: 13px;
+      font-weight: bold;
+      letter-spacing: 3px;
+      color: rgba(255, 255, 255, 0.7);
+      text-transform: uppercase;
+      text-shadow: 0 0 8px rgba(0, 0, 0, 0.8);
+      animation: cd-fade 0.5s ease both;
+    }
+
+    @keyframes cd-pop {
+      0%   { transform: scale(0.2); opacity: 0; filter: blur(6px); }
+      55%  { transform: scale(1.18); opacity: 1; filter: blur(0); }
+      100% { transform: scale(1); opacity: 1; filter: blur(0); }
+    }
+    @keyframes cd-go {
+      0%   { transform: scale(0.4) rotate(-6deg); opacity: 0; }
+      50%  { transform: scale(1.25) rotate(2deg); opacity: 1; }
+      100% { transform: scale(1) rotate(0deg); opacity: 1; }
+    }
+    @keyframes cd-ring {
+      0%   { transform: scale(0.4); opacity: 0.9; box-shadow: 0 0 0 0 rgba(255, 0, 128, 0.5); }
+      100% { transform: scale(1.6); opacity: 0; box-shadow: 0 0 0 28px rgba(255, 0, 128, 0); }
+    }
+    @keyframes cd-fade {
+      from { opacity: 0; transform: translateY(6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    #start-screen {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-image: url('start-bg.png'), url('UI/start-bg.png'), url('ui/start-bg.png'), url('assets/start-bg.png'), url('map/start-bg.png');
+      background-size: 100% 100%;
+      background-position: center;
+      background-repeat: no-repeat;
+      background-color: #000;
+      z-index: 10;
+      transition: opacity 0.5s ease;
+    }
+
+    #start-screen.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .menu-btn {
+      position: absolute;
+      transform: translate(-50%, -50%);
+      background: none; 
+      border: none;       
+      cursor: pointer;
+      padding: 0;
+      transition: transform 0.1s, filter 0.2s;
+      text-decoration: none; 
+      display: block;
+    }
+
+    .menu-btn img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      display: block;
+    }
+
+    .menu-btn:hover {
+      transform: translate(-50%, -50%) scale(1.06);
+      filter: brightness(1.08) saturate(1.1);
+    }
+
+    .menu-btn:active {
+      transform: translate(-50%, -50%) scale(0.94);
+    }
+    .menu-btn.no-img {
+      border: 1.5px solid #00e5ff;
+      background: rgba(0, 30, 50, 0.85);
+      border-radius: 22px;
+      color: #00e5ff;
+      box-shadow: 0 0 14px rgba(0, 229, 255, 0.3);
+    }
+    .menu-btn.no-img .img-btn-fallback {
+      display: flex !important;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      height: 100%;
+    }
+
+    /* ボタン配置（ポップUI・400px幅に収める） */
+    #start-button {
+      top: 58%;
+      left: 50%;
+      width: 340px;
+      height: 88px;
+      z-index: 12;
+      filter: drop-shadow(0 6px 12px rgba(0, 0, 0, 0.25));
+    }
+    #score-attack-button {
+      top: 70%;
+      left: 50%;
+      width: 280px;
+      height: 58px;
+      transform: translate(-50%, -50%);
+      z-index: 12;
+      padding: 0;
+      border: none;
+      background: none;
+      box-shadow: none;
+      filter: drop-shadow(0 4px 10px rgba(0, 100, 180, 0.3));
+    }
+    #ranking-button { top: 86%; left: 22%; width: 100px; height: 110px; z-index: 12; }
+    #custom-button  { top: 86%; left: 50%; width: 100px; height: 110px; z-index: 12; }
+    #howto-button   { top: 86%; left: 78%; width: 100px; height: 110px; z-index: 12; }
+
+    #ranking-button img,
+    #custom-button img,
+    #howto-button img {
+      filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.2));
+    }
+
+    /* ===== マップ風ステージ選択 ===== */
+    #mode-select-screen,
+    #sub-select-screen {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 15;
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      padding-top: 12px;
+      box-sizing: border-box;
+      background:
+        radial-gradient(ellipse at 50% 0%, rgba(255, 255, 255, 0.45) 0%, transparent 50%),
+        linear-gradient(180deg, #6ec8ff 0%, #a8e4ff 35%, #e8f8ff 70%, #fff6d6 100%);
+    }
+
+    #sub-select-screen {
+      z-index: 16;
+    }
+
+    #mode-select-screen.visible,
+    #sub-select-screen.visible {
+      display: flex;
+    }
+
+    #mode-select-title,
+    #sub-select-title {
+      color: #fff;
+      font-size: 22px;
+      font-weight: 900;
+      letter-spacing: 3px;
+      text-shadow:
+        0 2px 0 rgba(0, 90, 160, 0.35),
+        0 4px 12px rgba(0, 80, 140, 0.25);
+      margin-bottom: 2px;
+      flex-shrink: 0;
+      text-align: center;
+    }
+    #mode-select-title.has-img,
+    #sub-select-title.has-img {
+      font-size: 0;
+      color: transparent;
+      text-shadow: none;
+      letter-spacing: 0;
+      line-height: 0;
+    }
+    #mode-select-title .text-fallback,
+    #mode-select-subtitle .text-fallback,
+    #sub-select-title .text-fallback {
+      display: inline;
+    }
+    #mode-select-title.has-img .text-fallback,
+    #mode-select-subtitle.has-img .text-fallback,
+    #sub-select-title.has-img .text-fallback {
+      display: none !important;
+    }
+    /* タイトル画像にサブ文言も含まれている場合はサブを非表示 */
+    #mode-select-screen.title-has-logo #mode-select-subtitle {
+      display: none !important;
+    }
+    #mode-select-title img,
+    #mode-select-subtitle img {
+      display: none;
+    }
+    #mode-select-title.has-img > img,
+    #mode-select-subtitle.has-img > img {
+      display: block;
+    }
+    #mode-select-title > img,
+    #sub-select-title > img {
+      width: min(340px, 92%);
+      height: auto;
+      margin: 0 auto 2px;
+      filter: drop-shadow(0 4px 10px rgba(0, 60, 120, 0.25));
+      pointer-events: none;
+    }
+
+    #mode-select-subtitle {
+      color: #1a5a90;
+      font-size: 12px;
+      font-weight: bold;
+      letter-spacing: 1px;
+      margin-bottom: 6px;
+      text-shadow: 0 1px 0 rgba(255,255,255,0.6);
+      text-align: center;
+    }
+    #mode-select-subtitle.has-img {
+      font-size: 0;
+      color: transparent;
+      text-shadow: none;
+      margin-bottom: 4px;
+    }
+    #mode-select-subtitle > img {
+      width: min(280px, 85%);
+      height: auto;
+      margin: 0 auto;
+      filter: drop-shadow(0 2px 6px rgba(0, 60, 120, 0.2));
+    }
+
+    /* guide texts visible in panel */
+
+    /* マップ選択背景画像 */
+    #mode-select-screen.has-bg-img {
+      background-image: none;
+    }
+    #mode-select-screen .map-select-bg {
+      display: none;
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      z-index: 0;
+      pointer-events: none;
+    }
+    #mode-select-screen.has-bg-img .map-select-bg {
+      display: block;
+    }
+    #mode-select-screen > *:not(.map-select-bg) {
+      position: relative;
+      z-index: 1;
+    }
+
+    .world-banner.has-img {
+      background: transparent !important;
+      border: none !important;
+      box-shadow: none !important;
+      padding: 0 !important;
+    }
+    .world-banner.has-img .world-tag,
+    .world-banner.has-img .world-name {
+      display: none !important;
+    }
+    .world-banner-img {
+      display: none;
+      width: min(220px, 70%);
+      height: auto;
+      margin: 0 auto;
+      filter: drop-shadow(0 2px 6px rgba(0, 60, 120, 0.2));
+    }
+    .world-banner.has-img .world-banner-img {
+      display: block;
+    }
+
+    /* スコアアタック（マップ上部の別ルート） */
+    .map-score-btn {
+      width: 200px;
+      height: 42px;
+      border: 1.5px solid #00e5ff;
+      background: rgba(0, 30, 50, 0.7);
+      color: #00e5ff;
+      font-size: 14px;
+      font-weight: bold;
+      border-radius: 22px;
+      cursor: pointer;
+      letter-spacing: 2px;
+      margin-bottom: 10px;
+      box-shadow: 0 0 16px rgba(0, 229, 255, 0.3);
+      transition: transform 0.15s, box-shadow 0.2s, background 0.15s;
+      flex-shrink: 0;
+    }
+    .map-score-btn:hover {
+      transform: scale(1.05);
+      background: rgba(0, 50, 80, 0.75);
+      box-shadow: 0 0 24px rgba(0, 229, 255, 0.5);
+    }
+
+    /* マップ本体（スクロール可能） */
+    .stage-map {
+      position: relative;
+      width: 100%;
+      max-width: 360px;
+      flex: 1;
+      min-height: 0;
+      margin-bottom: 8px;
+      overflow-y: auto;
+      overflow-x: hidden;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior: contain;
+    }
+    /* スクロールバー（見やすく） */
+    .stage-map::-webkit-scrollbar {
+      width: 6px;
+    }
+    .stage-map::-webkit-scrollbar-thumb {
+      background: rgba(0, 229, 255, 0.4);
+      border-radius: 3px;
+    }
+    .stage-map-inner {
+      position: relative;
+      width: 100%;
+      min-height: 100%;
+      padding-bottom: 8px;
+      box-sizing: border-box;
+    }
+
+    /* 道（縦のパス）※クリックを邪魔しない */
+    .map-path {
+      position: absolute;
+      left: 50%;
+      top: 56px;
+      bottom: 56px;
+      width: 4px;
+      transform: translateX(-50%);
+      background: linear-gradient(180deg,
+        rgba(0, 180, 255, 0.15),
+        rgba(0, 200, 255, 0.45),
+        rgba(80, 140, 255, 0.4),
+        rgba(0, 220, 180, 0.3)
+      );
+      border-radius: 2px;
+      box-shadow: 0 0 10px rgba(0, 200, 255, 0.25);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* サブ用の横パス */
+    .map-path-h {
+      position: absolute;
+      top: 50%;
+      left: 36px;
+      right: 36px;
+      height: 4px;
+      transform: translateY(-50%);
+      background: linear-gradient(90deg,
+        rgba(255, 0, 128, 0.3),
+        rgba(0, 200, 255, 0.6),
+        rgba(0, 255, 150, 0.4)
+      );
+      border-radius: 2px;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .map-nodes {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-start;
+      align-items: center;
+      gap: 36px;
+      padding: 20px 0 36px;
+      box-sizing: border-box;
+      z-index: 2;
+      min-height: min-content;
+      pointer-events: none;
+    }
+    .map-nodes .map-node {
+      pointer-events: auto;
+      flex-shrink: 0;
+    }
+
+    .map-nodes-h {
+      flex-direction: row;
+      justify-content: center;
+      gap: 28px;
+      padding: 24px 16px;
+      align-items: center;
+      min-height: 120px;
+    }
+
+    /* ノード（ステージ地点） */
+    .map-node {
+      position: relative;
+      width: 72px;
+      height: 72px;
+      border-radius: 50%;
+      border: 3px solid #00c8ff;
+      background: radial-gradient(circle at 35% 30%, #1a2a48, #0c1528 70%);
+      color: #fff;
+      font-weight: bold;
+      font-size: 13px;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      line-height: 1.15;
+      box-shadow:
+        0 0 0 4px rgba(0,0,0,0.35),
+        0 0 16px rgba(255, 0, 128, 0.35);
+      transition: transform 0.15s, box-shadow 0.2s, border-color 0.2s;
+      z-index: 2;
+      padding: 0;
+    }
+    .map-node:hover {
+      transform: scale(1.12);
+      box-shadow:
+        0 0 0 4px rgba(0,0,0,0.35),
+        0 0 24px rgba(255, 0, 128, 0.65);
+    }
+    .map-node:active {
+      transform: scale(0.96);
+    }
+    .map-node .node-label {
+      font-size: 10px;
+      opacity: 0.7;
+      font-weight: normal;
+    }
+    .map-node .node-num {
+      font-size: 16px;
+      letter-spacing: 0.5px;
+    }
+
+    /* ステージごとの色分け */
+    .map-node[data-main="1"] { border-color: #5cff8d; box-shadow: 0 0 0 4px rgba(0,0,0,0.35), 0 0 14px rgba(92,255,141,0.35); }
+    .map-node[data-main="2"] { border-color: #ffb84d; box-shadow: 0 0 0 4px rgba(0,0,0,0.35), 0 0 14px rgba(255,184,77,0.35); }
+    .map-node[data-main="3"] { border-color: #7b8cff; box-shadow: 0 0 0 4px rgba(0,0,0,0.35), 0 0 14px rgba(123,140,255,0.35); }
+    .map-node[data-main="4"] { border-color: #ff4d9a; box-shadow: 0 0 0 4px rgba(0,0,0,0.35), 0 0 14px rgba(255,77,154,0.4); }
+
+    .map-node[data-main="1"]:hover { box-shadow: 0 0 0 4px rgba(0,0,0,0.35), 0 0 22px rgba(92,255,141,0.6); }
+    .map-node[data-main="2"]:hover { box-shadow: 0 0 0 4px rgba(0,0,0,0.35), 0 0 22px rgba(255,184,77,0.6); }
+    .map-node[data-main="3"]:hover { box-shadow: 0 0 0 4px rgba(0,0,0,0.35), 0 0 22px rgba(123,140,255,0.6); }
+    .map-node[data-main="4"]:hover { box-shadow: 0 0 0 4px rgba(0,0,0,0.35), 0 0 22px rgba(255,77,154,0.65); }
+    .map-node[data-main="5"] { border-color: #ff6633; box-shadow: 0 0 0 4px rgba(0,0,0,0.35), 0 0 14px rgba(255,102,51,0.4); }
+    .map-node[data-main="6"] { border-color: #a78bfa; box-shadow: 0 0 0 4px rgba(0,0,0,0.35), 0 0 14px rgba(167,139,250,0.4); }
+    .map-node[data-main="5"]:hover { box-shadow: 0 0 0 4px rgba(0,0,0,0.35), 0 0 22px rgba(255,102,51,0.65); }
+    .map-node[data-main="6"]:hover { box-shadow: 0 0 0 4px rgba(0,0,0,0.35), 0 0 22px rgba(167,139,250,0.65); }
+
+    /* サブノード */
+    .map-node.sub {
+      width: 64px;
+      height: 64px;
+      font-size: 15px;
+    }
+
+    /* 未解放 */
+    .map-node.locked {
+      border-color: #444 !important;
+      background: radial-gradient(circle at 35% 30%, #2a2a2a, #151515 70%) !important;
+      color: #666 !important;
+      box-shadow: 0 0 0 4px rgba(0,0,0,0.35) !important;
+      cursor: not-allowed;
+      filter: grayscale(0.8);
+    }
+    .map-node.locked:hover {
+      transform: none;
+      box-shadow: 0 0 0 4px rgba(0,0,0,0.35) !important;
+    }
+    .map-node.locked::after {
+      content: "🔒";
+      position: absolute;
+      bottom: -2px;
+      right: -2px;
+      font-size: 14px;
+      filter: none;
+    }
+
+    /* クリア済み */
+    .map-node.cleared:not(.locked)::before {
+      content: "✓";
+      position: absolute;
+      top: -4px;
+      right: -4px;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: #2ecc71;
+      color: #fff;
+      font-size: 12px;
+      line-height: 20px;
+      text-align: center;
+      box-shadow: 0 0 6px rgba(46, 204, 113, 0.6);
+    }
+
+    /* 装飾用の小さな星・点 */
+    .map-deco {
+      position: absolute;
+      width: 4px;
+      height: 4px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.35);
+      pointer-events: none;
+    }
+
+    /* 旧テキスト戻るボタン用スタイルは img-btn に統一したため削除 */
+
+
+
+    /* ===== ワールド地図（風景＋地点） ===== */
+    .world-shell {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      width: 100%;
+      max-width: 400px;
+      flex: 0 0 auto;
+      min-height: 0;
+      margin: 0;
+      padding: 0 4px;
+      box-sizing: border-box;
+    }
+    .world-map-row {
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      width: 100%;
+    }
+    .world-nav {
+      background: linear-gradient(180deg, #ffe566, #ffb800) !important;
+      border: 3px solid #1a3a6a !important;
+      color: #1a2a4a !important;
+      box-shadow: 0 3px 0 #c99000, 0 4px 10px rgba(0,0,0,0.15) !important;
+      border-radius: 14px !important;
+      font-weight: 900 !important;
+      width: 32px;
+      align-self: center;
+      height: 40px;
+      border-radius: 10px;
+      border: 1.5px solid rgba(0, 229, 255, 0.5);
+      background: rgba(0, 30, 55, 0.75);
+      color: #00e5ff;
+      font-size: 15px;
+      cursor: pointer;
+      flex-shrink: 0;
+      box-shadow: 0 0 10px rgba(0, 200, 255, 0.2);
+    }
+    .world-nav:disabled { opacity: 0.3; cursor: default; }
+    .world-main {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .world-banner {
+      text-align: center;
+      flex-shrink: 0;
+      background: rgba(255,255,255,0.85);
+      border-radius: 12px;
+      border: 2px solid #fff;
+      box-shadow: 0 3px 8px rgba(30, 100, 160, 0.12);
+      padding: 3px 10px;
+      margin-bottom: 4px;
+    }
+    .world-tag {
+      color: #00a0e0 !important;
+      font-weight: 900 !important;
+      text-shadow: none !important;
+    }
+    .world-name {
+      color: #1a2a4a !important;
+      font-weight: 900 !important;
+      text-shadow: none !important;
+    }
+    .world-tag {
+      display: block;
+      font-size: 10px;
+      letter-spacing: 3px;
+      color: rgba(0, 229, 255, 0.75);
+      font-weight: bold;
+    }
+    .world-name {
+      display: block;
+      font-size: 16px;
+      font-weight: 900;
+      color: #fff;
+      letter-spacing: 2px;
+      text-shadow: 0 0 12px rgba(0, 200, 255, 0.45);
+    }
+
+    .world-map-viewport {
+      flex: 1 1 auto;
+      width: 100%;
+      min-width: 0;
+      height: 220px;
+      min-height: 220px;
+      max-height: 220px;
+      overflow-x: auto !important;
+      overflow-y: hidden !important;
+      border-radius: 22px;
+      border: 5px solid #ffffff;
+      background: linear-gradient(180deg, #b8e8ff 0%, #7ec8ff 100%);
+      box-shadow:
+        0 0 0 3px #3db4ff,
+        0 0 0 6px rgba(255,255,255,0.9),
+        0 8px 20px rgba(20, 90, 160, 0.28),
+        inset 0 2px 8px rgba(255,255,255,0.5);
+      position: relative;
+      box-sizing: border-box;
+    }
+    .world-map-viewport:active {
+      cursor: grabbing;
+    }
+    .world-map-viewport::-webkit-scrollbar { height: 6px; }
+    .world-map-viewport::-webkit-scrollbar-thumb {
+      background: rgba(255,255,255,0.7);
+      border-radius: 4px;
+    }
+    .world-map-canvas {
+      position: relative;
+      width: 640px;
+      height: 100%;
+      min-height: 200px;
+      background-color: #7ec8ff;
+      background-size: cover;
+      background-position: center;
+      background-repeat: no-repeat;
+      border-radius: 16px;
+    }
+
+        /* 画像が無いときの簡易グラデ（ワールド色） */
+    .world-map-canvas[data-main="1"] { background-image: linear-gradient(180deg, #7ec8ff 0%, #5cb85c 45%, #3d8b3d 100%); }
+    .world-map-canvas[data-main="2"] { background-image: linear-gradient(180deg, #ffb347 0%, #e07a3a 45%, #6b3a2a 100%); }
+    .world-map-canvas[data-main="3"] { background-image: linear-gradient(180deg, #1a1040 0%, #2a2060 40%, #0a0818 100%); }
+    .world-map-canvas[data-main="4"] { background-image: linear-gradient(180deg, #0a2030 0%, #103050 40%, #201030 100%); }
+    .world-map-canvas[data-main="5"] { background-image: linear-gradient(180deg, #3a1010 0%, #8b2500 50%, #1a0800 100%); }
+    .world-map-canvas[data-main="6"] { background-image: linear-gradient(180deg, #050510 0%, #1a0a30 50%, #0a1020 100%); }
+
+    .world-map-path {
+      position: absolute;
+      left: 12%;
+      right: 12%;
+      top: 50%;
+      height: 6px;
+      transform: translateY(-50%);
+      background: repeating-linear-gradient(
+        90deg,
+        rgba(255, 255, 255, 0.85) 0 10px,
+        rgba(255, 255, 255, 0.15) 10px 18px
+      );
+      border-radius: 3px;
+      box-shadow: 0 2px 0 rgba(0, 0, 0, 0.25);
+      pointer-events: none;
+      z-index: 1;
+      opacity: 0.9;
+    }
+
+    .map-spot {
+      position: absolute;
+      width: 44px;
+      height: 44px;
+      margin-left: -22px;
+      margin-top: -22px;
+      border: none;
+      background: transparent;
+      padding: 0;
+      cursor: pointer;
+      z-index: 2;
+      -webkit-tap-highlight-color: transparent;
+    }
+    /* 丸マーカーは非表示（名所画像を本体にする） */
+    .spot-ring {
+      display: none !important;
+    }
+    .map-spot {
+      width: 88px;
+      height: 88px;
+      margin-left: -44px;
+      margin-top: -44px;
+    }
+    .spot-landmark {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -60%);
+      width: 96px;
+      height: 96px;
+      object-fit: contain;
+      pointer-events: none;
+      filter: drop-shadow(0 4px 8px rgba(0,0,0,0.45));
+      z-index: 3;
+      display: none;
+    }
+    .map-spot.has-landmark .spot-landmark {
+      display: block !important;
+      opacity: 1 !important;
+      visibility: visible !important;
+    }
+    .map-spot.has-landmark .spot-label {
+      display: none;
+    }
+    .map-spot.selected .spot-landmark {
+      filter: drop-shadow(0 0 8px rgba(0, 229, 255, 0.7)) drop-shadow(0 4px 6px rgba(0,0,0,0.4));
+      transform: translate(-50%, -55%) scale(1.08);
+    }
+    .map-spot.locked .spot-landmark {
+      filter: grayscale(0.75) brightness(0.7);
+      opacity: 0.75;
+    }
+    .map-spot.cleared .spot-landmark {
+      filter: drop-shadow(0 0 6px rgba(255, 220, 80, 0.55)) drop-shadow(0 4px 6px rgba(0,0,0,0.35));
+    }
+    /* 選択中キャラ */
+    .map-char {
+      position: absolute;
+      width: 52px;
+      height: 52px;
+      margin-left: -26px;
+      margin-top: -58px;
+      object-fit: contain;
+      pointer-events: none;
+      z-index: 5;
+      display: none;
+      filter: drop-shadow(0 2px 3px rgba(0,0,0,0.5));
+      transition: left 0.25s ease, top 0.25s ease;
+    }
+    .map-char.visible {
+      display: block !important;
+      opacity: 1 !important;
+      animation: char-bounce 0.45s ease;
+      z-index: 8;
+    }
+    @keyframes char-bounce {
+      0% { transform: translateY(8px); opacity: 0; }
+      60% { transform: translateY(-4px); opacity: 1; }
+      100% { transform: translateY(0); opacity: 1; }
+    }
+
+    .spot-label {
+      display: block;
+      margin-top: 2px;
+      font-size: 10px;
+      font-weight: bold;
+      color: #fff;
+      text-shadow: 0 1px 3px rgba(0,0,0,0.9);
+      letter-spacing: 0.5px;
+    }
+    .map-spot.locked::after {
+      content: "🔒";
+      position: absolute;
+      top: -4px;
+      right: -2px;
+      font-size: 12px;
+    }
+
+    .map-deco-layer {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 1;
+      overflow: hidden;
+    }
+    .map-path-svg {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 2;
+      pointer-events: none;
+    }
+    .world-map-canvas {
+      position: relative;
+      width: 640px;
+      height: 100%;
+      min-height: 210px;
+      background-color: #1a3040;
+      background-size: cover;
+      background-position: center;
+      background-repeat: no-repeat;
+    }
+
+    /* 装飾パーツ共通 */
+    .deco {
+      position: absolute;
+      pointer-events: none;
+    }
+    .deco-tree {
+      width: 0; height: 0;
+      border-left: 14px solid transparent;
+      border-right: 14px solid transparent;
+      border-bottom: 28px solid #2d8a3e;
+      filter: drop-shadow(0 2px 2px rgba(0,0,0,0.25));
+    }
+    .deco-tree::after {
+      content: "";
+      position: absolute;
+      left: -4px; top: 24px;
+      width: 8px; height: 10px;
+      background: #6b3e1a;
+    }
+    .deco-bush {
+      width: 28px; height: 16px;
+      background: #3cb05a;
+      border-radius: 50% 50% 40% 40%;
+      box-shadow: 12px 4px 0 #2e9a48, -10px 3px 0 #36a850;
+    }
+    .deco-cloud {
+      width: 40px; height: 16px;
+      background: rgba(255,255,255,0.85);
+      border-radius: 20px;
+      box-shadow: 14px 4px 0 rgba(255,255,255,0.8), -12px 2px 0 rgba(255,255,255,0.75);
+      opacity: 0.9;
+    }
+    .deco-house {
+      width: 36px; height: 28px;
+      background: #e8d5a3;
+      border: 2px solid rgba(0,0,0,0.2);
+      border-radius: 2px 2px 0 0;
+      box-shadow: 0 3px 6px rgba(0,0,0,0.25);
+    }
+    .deco-house::before {
+      content: "";
+      position: absolute;
+      left: -6px; top: -16px;
+      border-left: 24px solid transparent;
+      border-right: 24px solid transparent;
+      border-bottom: 18px solid #c45c3a;
+    }
+    .deco-house::after {
+      content: "";
+      position: absolute;
+      left: 12px; bottom: 0;
+      width: 10px; height: 14px;
+      background: #6b3e1a;
+    }
+    .deco-castle {
+      width: 48px; height: 44px;
+      background: linear-gradient(180deg, #c8c8d0, #8a8a98);
+      border: 2px solid rgba(0,0,0,0.25);
+      border-radius: 2px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+    }
+    .deco-castle::before {
+      content: "";
+      position: absolute;
+      left: 8px; top: -18px;
+      width: 28px; height: 20px;
+      background: #a0a0b0;
+      border: 2px solid rgba(0,0,0,0.2);
+      clip-path: polygon(0 100%, 0 35%, 20% 35%, 20% 0, 40% 0, 40% 35%, 60% 35%, 60% 0, 80% 0, 80% 35%, 100% 35%, 100% 100%);
+    }
+    .deco-castle::after {
+      content: "";
+      position: absolute;
+      left: 18px; bottom: 0;
+      width: 12px; height: 16px;
+      background: #3a3050;
+    }
+    .deco-pipe {
+      width: 26px; height: 34px;
+      background: linear-gradient(90deg, #2ecc71, #27ae60 40%, #1e8449);
+      border-radius: 4px 4px 2px 2px;
+      border: 2px solid rgba(0,0,0,0.2);
+      box-shadow: 0 3px 6px rgba(0,0,0,0.25);
+    }
+    .deco-pipe::before {
+      content: "";
+      position: absolute;
+      left: -4px; top: -6px;
+      width: 30px; height: 12px;
+      background: linear-gradient(90deg, #58d68d, #27ae60);
+      border-radius: 4px;
+      border: 2px solid rgba(0,0,0,0.15);
+    }
+    .deco-mushroom {
+      width: 22px; height: 12px;
+      background: #e74c3c;
+      border-radius: 12px 12px 2px 2px;
+      box-shadow: inset 0 -2px 0 rgba(0,0,0,0.15);
+    }
+    .deco-mushroom::after {
+      content: "";
+      position: absolute;
+      left: 7px; top: 10px;
+      width: 8px; height: 10px;
+      background: #f5e6c8;
+      border-radius: 0 0 2px 2px;
+    }
+    .deco-star {
+      width: 14px; height: 14px;
+      background: #ffe566;
+      clip-path: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
+      filter: drop-shadow(0 0 4px rgba(255, 220, 80, 0.7));
+    }
+    .deco-rock {
+      width: 30px; height: 18px;
+      background: #7a7a7a;
+      border-radius: 40% 40% 20% 20%;
+      box-shadow: 8px 4px 0 #5a5a5a;
+    }
+    .deco-crystal {
+      width: 16px; height: 28px;
+      background: linear-gradient(180deg, #a78bfa, #5b21b6);
+      clip-path: polygon(50% 0%, 100% 40%, 80% 100%, 20% 100%, 0% 40%);
+      opacity: 0.85;
+      filter: drop-shadow(0 0 6px rgba(167, 139, 250, 0.5));
+    }
+    .deco-lava {
+      width: 50px; height: 14px;
+      background: linear-gradient(90deg, #ff4400, #ff8800, #ff4400);
+      border-radius: 8px;
+      opacity: 0.85;
+      box-shadow: 0 0 10px rgba(255, 80, 0, 0.5);
+    }
+    .deco-cyber {
+      width: 20px; height: 20px;
+      border: 2px solid #00e5ff;
+      box-shadow: 0 0 8px rgba(0, 229, 255, 0.5), inset 0 0 6px rgba(0, 229, 255, 0.3);
+      transform: rotate(45deg);
+    }
+    .deco-flag {
+      width: 4px; height: 28px;
+      background: #ddd;
+      box-shadow: 0 0 0 1px rgba(0,0,0,0.15);
+    }
+    .deco-flag::after {
+      content: "";
+      position: absolute;
+      left: 4px; top: 2px;
+      width: 16px; height: 10px;
+      background: #ff4d6d;
+      clip-path: polygon(0 0, 100% 50%, 0 100%);
+    }
+
+    /* マップ入場演出 */
+    #mode-select-screen.visible {
+      animation: mode-screen-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+    }
+    @keyframes mode-screen-in {
+      0% { opacity: 0; }
+      100% { opacity: 1; }
+    }
+    #mode-select-screen.map-enter .world-map-viewport {
+      animation: map-reveal 0.75s cubic-bezier(0.22, 1, 0.36, 1) both;
+    }
+    @keyframes map-reveal {
+      0% { opacity: 0; transform: translateY(18px) scale(0.96); filter: blur(4px); }
+      100% { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+    }
+    .map-spot {
+      animation: spot-pop 0.45s cubic-bezier(0.22, 1.2, 0.36, 1) both;
+    }
+    .map-spot[data-sub="1"] { animation-delay: 0.2s; }
+    .map-spot[data-sub="2"] { animation-delay: 0.35s; }
+    .map-spot[data-sub="3"] { animation-delay: 0.5s; }
+    @keyframes spot-pop {
+      0% { transform: scale(0); opacity: 0; }
+      100% { transform: scale(1); opacity: 1; }
+    }
+
+
+    /* challenge / back は .img-btn で画像表示 */
+    .challenge-btn.img-btn,
+    #mode-back-btn.img-btn {
+      border: none !important;
+      background: transparent !important;
+      box-shadow: none !important;
+      color: inherit;
+      padding: 0;
+      width: auto;
+      height: auto;
+      border-radius: 0;
+      margin: 0;
+      transform: scale(1.15);
+      transform-origin: center;
+    }
+    .challenge-btn.img-btn img,
+    #mode-back-btn.img-btn img {
+      max-height: 52px;
+      width: auto;
+    }
+    .world-hint {
+      font-size: 11px;
+      color: #3a6a90;
+      font-weight: bold;
+      text-align: center;
+      flex-shrink: 0;
+      min-height: 0;
+      margin: 2px 0 4px;
+      line-height: 1.2;
+    }
+
+    .img-btn {
+      position: relative;
+      border: none;
+      background: transparent;
+      padding: 0;
+      cursor: pointer;
+      line-height: 0;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .img-btn img {
+      display: block;
+      height: 40px;
+      width: auto;
+      max-width: 130px;
+      object-fit: contain;
+      filter: drop-shadow(0 2px 6px rgba(0,0,0,0.35));
+      transition: transform 0.1s, filter 0.15s;
+    }
+    .img-btn:not(:disabled):active img {
+      transform: scale(0.95);
+    }
+    .img-btn:disabled {
+      cursor: not-allowed;
+      opacity: 0.4;
+      filter: grayscale(0.5);
+    }
+    .img-btn .img-btn-fallback {
+      display: none;
+      padding: 10px 18px;
+      border-radius: 10px;
+      border: 1.5px solid #00e5ff;
+      background: rgba(0, 40, 70, 0.85);
+      color: #00e5ff;
+      font-weight: bold;
+      font-size: 13px;
+    }
+    /* 画像が読めないとき文字ボタンに切り替え（JSでも可） */
+    .img-btn.no-img img { display: none; }
+    .img-btn.no-img .img-btn-fallback { display: inline-block; }
+
+
+    .map-guide-panel {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+      width: 100%;
+      max-width: 280px;
+      margin: 4px auto 0;
+      padding: 6px 8px 8px;
+      box-sizing: border-box;
+      background: linear-gradient(180deg, rgba(255,255,255,0.95) 0%, rgba(230,246,255,0.95) 100%);
+      border: 3px solid #fff;
+      border-radius: 16px;
+      box-shadow:
+        0 0 0 2px #5ec8ff,
+        0 4px 10px rgba(20, 90, 160, 0.18);
+      position: relative;
+    }
+    .map-guide-panel.has-img-bg {
+      background: transparent;
+      border: none;
+      box-shadow: none;
+      padding: 4px;
+    }
+    /* map-guide-bg は下の上書きCSSで制御 */
+    .map-guide-top {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      width: 100%;
+      position: relative;
+      z-index: 1;
+    }
+    .map-guide-char-wrap {
+      width: 36px;
+      height: 36px;
+      flex-shrink: 0;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .map-guide-char-wrap::before {
+      content: "🏃";
+      font-size: 24px;
+      position: absolute;
+    }
+    .map-guide-char {
+      width: 36px;
+      height: 36px;
+      object-fit: contain;
+      position: relative;
+      z-index: 1;
+    }
+    .map-guide-char:not([src]), .map-guide-char[src=""] { opacity: 0; }
+    .map-guide-texts { flex: 1; min-width: 0; text-align: left; }
+
+    .world-selected {
+      display: block !important;
+      text-align: left;
+      font-size: 12px;
+      color: #1a5a90;
+      font-weight: 900;
+      min-height: 1em;
+      margin: 0;
+      position: relative;
+      z-index: 1;
+      text-shadow: none;
+    }
+    .world-hint {
+      display: block !important;
+      font-size: 10px;
+      color: #4a7aa0;
+      font-weight: bold;
+      text-align: left;
+      margin: 1px 0 0;
+      line-height: 1.25;
+      position: relative;
+      z-index: 1;
+    }
+    .world-action {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      flex-shrink: 0;
+      padding: 0;
+      margin: 2px 0 0;
+      position: relative;
+      z-index: 1;
+    }
+    .world-action .img-btn {
+      transform: scale(1.15);
+      transform-origin: center;
+    }
+    .world-action .img-btn img {
+      max-height: 52px;
+      width: auto;
+    }
+
+    /* ステージ名プレート */
+    .spot-plate {
+      position: absolute;
+      left: 50%;
+      top: 100%;
+      transform: translateX(-50%);
+      margin-top: 2px;
+      min-width: 56px;
+      max-width: 88px;
+      padding: 2px 4px;
+      background: url("ui_plate.png"), url("UI/ui_plate.png"), url("ui/ui_plate.png"), url("assets/ui_plate.png") center / 100% 100% no-repeat,
+                  linear-gradient(180deg, #f5e6c8, #e0c9a0);
+      border: 2px solid #8b6914;
+      border-radius: 4px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.35);
+      pointer-events: none;
+      z-index: 3;
+    }
+    .spot-plate .plate-title {
+      display: block;
+      font-size: 7px;
+      font-weight: bold;
+      color: #3a2a10;
+      text-align: center;
+      line-height: 1.2;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .map-spot.selected .spot-plate {
+      box-shadow: 0 0 0 2px rgba(0, 229, 255, 0.7), 0 2px 6px rgba(0,0,0,0.4);
+    }
+
+    .world-dots {
+      display: flex;
+      gap: 8px;
+      justify-content: center;
+      margin-bottom: 4px;
+      margin-top: 6px;
+      flex-shrink: 0;
+    }
+    .world-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.7);
+      border: 2px solid #4db8ff;
+      padding: 0;
+      cursor: pointer;
+    }
+    .world-dot.active {
+      background: #ffb800;
+      border-color: #1a3a6a;
+      box-shadow: 0 2px 6px rgba(255, 180, 0, 0.5);
+      transform: scale(1.25);
+    }
+
+    /* 互換用（JSが .mode-btn を参照する場合がある） */
+    .mode-btn { display: none; }
+
+    /* ワープ：左上・距離パネルの下（被らない） */
+    #warp-button {
+      position: absolute;
+      left: 12px;
+      top: 96px;
+      right: auto;
+      bottom: auto;
+      width: 56px;
+      height: 56px;
+      border: 3px solid #fff;
+      border-radius: 16px;
+      background: linear-gradient(180deg, #c9a0ff 0%, #8b5cf6 55%, #6d28d9 100%);
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 40;
+      cursor: pointer;
+      padding: 4px;
+      box-shadow: 0 4px 0 #4c1d95, 0 8px 16px rgba(0,0,0,0.25);
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+    }
+    #warp-button img {
+      width: 36px;
+      height: 36px;
+      object-fit: contain;
+      pointer-events: none;
+    }
+    #warp-button #warp-count {
+      color: #e0c0ff;
+      font-size: 12px;
+      font-weight: bold;
+      line-height: 1;
+      margin-top: 2px;
+      pointer-events: none;
+    }
+    #warp-button.disabled {
+      opacity: 0.4;
+      filter: grayscale(0.6);
+    }
+    #warp-button:not(.disabled):active {
+      transform: scale(0.92);
+    }
+
+    /* 夜空エリア：能力選択 */
+    #ability-choice-overlay {
+      display: none !important;
+      pointer-events: none !important;
+      position: absolute;
+      inset: 0;
+      z-index: 45;
+      background: rgba(110, 190, 255, 0.55);
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      padding: 16px;
+      box-sizing: border-box;
+    }
+    #ability-choice-overlay.visible {
+      display: flex;
+    }
+    .ability-panel {
+      width: 100%;
+      max-width: 340px;
+      background: rgba(255, 255, 255, 0.96);
+      border: 4px solid #fff;
+      border-radius: 24px;
+      padding: 18px 14px 16px;
+      box-shadow: 0 10px 28px rgba(30, 90, 150, 0.25);
+    }
+    .ability-title {
+      text-align: center;
+      font-size: 18px;
+      font-weight: 900;
+      color: #1a5a90;
+      letter-spacing: 2px;
+      margin-bottom: 4px;
+      text-shadow: 0 1px 0 rgba(255,255,255,0.8);
+    }
+    .ability-sub {
+      text-align: center;
+      font-size: 12px;
+      font-weight: bold;
+      color: #4a7aa0;
+      margin-bottom: 14px;
+    }
+    .ability-options {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .ability-opt {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 3px;
+      width: 100%;
+      text-align: left;
+      border: 3px solid #1a3a6a;
+      background: linear-gradient(180deg, #f0f9ff 0%, #e0f2ff 100%);
+      color: #1a2a4a;
+      border-radius: 16px;
+      padding: 12px 14px;
+      cursor: pointer;
+      font-family: inherit;
+      box-shadow: 0 4px 0 #8ab8d8, 0 6px 12px rgba(0,0,0,0.1);
+      transition: transform 0.1s, filter 0.15s;
+    }
+    .ability-opt:nth-child(1) {
+      background: linear-gradient(180deg, #e8f8ff 0%, #c8f0ff 100%);
+      box-shadow: 0 4px 0 #40a0d0, 0 6px 12px rgba(0,0,0,0.1);
+    }
+    .ability-opt:nth-child(2) {
+      background: linear-gradient(180deg, #ffe8f2 0%, #ffd0e4 100%);
+      box-shadow: 0 4px 0 #e070a0, 0 6px 12px rgba(0,0,0,0.1);
+    }
+    .ability-opt:nth-child(3) {
+      background: linear-gradient(180deg, #e8fff0 0%, #c8f5d8 100%);
+      box-shadow: 0 4px 0 #40b070, 0 6px 12px rgba(0,0,0,0.1);
+    }
+    .ability-opt:hover, .ability-opt:active {
+      transform: scale(1.03) translateY(-1px);
+      filter: brightness(1.05);
+    }
+    .ability-opt-name {
+      font-size: 15px;
+      font-weight: 900;
+      color: #1a2a4a;
+    }
+    .ability-opt-desc {
+      font-size: 11px;
+      font-weight: bold;
+      color: #4a6a8a;
+    }
+    #invuln-button {
+      position: absolute;
+      left: 76px;
+      top: 96px;
+      right: auto;
+      bottom: auto;
+      width: 56px;
+      height: 56px;
+      border: 3px solid #fff;
+      border-radius: 16px;
+      background: linear-gradient(180deg, #ffe66b 0%, #ffc107 55%, #ff9800 100%);
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 40;
+      cursor: pointer;
+      padding: 4px;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+      color: #fff;
+      font-size: 11px;
+      font-weight: 900;
+      line-height: 1.15;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.25);
+      box-shadow: 0 4px 0 #c77700, 0 8px 16px rgba(0,0,0,0.25);
+    }
+    #invuln-button #invuln-count {
+      font-size: 13px;
+      margin-top: 2px;
+      color: #fff;
+    }
+    #invuln-button.disabled {
+      opacity: 0.4;
+      filter: grayscale(0.6);
+    }
+    #invuln-button:not(.disabled):active {
+      transform: scale(0.92);
+    }
+
+    /* 設定パネル（ポップ） */
+    #settings-button {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      z-index: 14;
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      border: 3px solid #1a3a6a;
+      background: linear-gradient(180deg, #ffe566, #ffb800);
+      color: #1a2a4a;
+      font-size: 20px;
+      font-weight: 900;
+      cursor: pointer;
+      box-shadow: 0 3px 0 #c99000, 0 4px 10px rgba(0,0,0,0.15);
+      line-height: 1;
+    }
+    #settings-overlay {
+      display: none;
+      position: absolute;
+      inset: 0;
+      z-index: 60;
+      background: rgba(100, 180, 240, 0.55);
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      box-sizing: border-box;
+    }
+    #settings-overlay.visible { display: flex; }
+    .settings-panel {
+      width: 100%;
+      max-width: 340px;
+      background: rgba(255,255,255,0.97);
+      border-radius: 22px;
+      border: 4px solid #fff;
+      box-shadow: 0 10px 28px rgba(30,90,150,0.25);
+      padding: 16px 14px 14px;
+      max-height: 90%;
+      overflow-y: auto;
+      color: #1a2a4a;
+      font-family: inherit;
+    }
+    .settings-panel h2 {
+      margin: 0 0 8px;
+      text-align: center;
+      font-size: 18px;
+      font-weight: 900;
+      color: #1a5a90;
+    }
+    .settings-section {
+      background: #f0f9ff;
+      border-radius: 14px;
+      border: 2px solid #d6eeff;
+      padding: 12px;
+      margin-bottom: 10px;
+    }
+    .settings-section h3 {
+      margin: 0 0 8px;
+      font-size: 13px;
+      font-weight: 900;
+      color: #0080c0;
+    }
+    .settings-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 8px;
+      font-size: 13px;
+      font-weight: bold;
+    }
+    .settings-row input[type="range"] { flex: 1; accent-color: #00c2ff; }
+    .stat-line {
+      font-size: 12px;
+      font-weight: bold;
+      color: #2a4a6a;
+      margin: 4px 0;
+      display: flex;
+      justify-content: space-between;
+    }
+    .settings-close {
+      display: block;
+      width: 100%;
+      margin-top: 4px;
+      padding: 12px;
+      border-radius: 999px;
+      border: 3px solid #1a3a6a;
+      background: linear-gradient(180deg, #ffe566, #ffb800);
+      font-weight: 900;
+      font-size: 14px;
+      cursor: pointer;
+      box-shadow: 0 3px 0 #c99000;
+    }
+
+    /* クリア／ゲームオーバー結果メニュー（ポップ） */
+    #result-menu {
+      display: none;
+      position: absolute;
+      left: 50%;
+      bottom: 28px;
+      transform: translateX(-50%);
+      z-index: 42;
+      width: calc(100% - 32px);
+      max-width: 300px;
+      flex-direction: column;
+      gap: 8px;
+      pointer-events: auto;
+    }
+    #result-menu.visible {
+      display: flex;
+    }
+    .result-btn {
+      display: block;
+      width: 100%;
+      padding: 12px 14px;
+      border-radius: 999px;
+      border: 3px solid #1a3a6a;
+      font-weight: 900;
+      font-size: 14px;
+      cursor: pointer;
+      font-family: inherit;
+      text-align: center;
+      box-sizing: border-box;
+      transition: transform 0.1s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .result-btn:active { transform: scale(0.96) translateY(1px); }
+    .result-btn.retry {
+      background: linear-gradient(180deg, #7ee0ff, #00c2ff);
+      color: #fff;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.2);
+      box-shadow: 0 4px 0 #0080b0, 0 6px 12px rgba(0,0,0,0.12);
+    }
+    .result-btn.next {
+      background: linear-gradient(180deg, #7dffb0, #3ddc84);
+      color: #0a3a20;
+      box-shadow: 0 4px 0 #1a8a50, 0 6px 12px rgba(0,0,0,0.12);
+    }
+    .result-btn.prev {
+      background: linear-gradient(180deg, #ffe566, #ffb800);
+      color: #1a2a4a;
+      box-shadow: 0 4px 0 #c99000, 0 6px 12px rgba(0,0,0,0.12);
+    }
+    .result-btn.title {
+      background: linear-gradient(180deg, #fff, #e8f4ff);
+      color: #1a5a90;
+      box-shadow: 0 4px 0 #8ab8d8, 0 6px 12px rgba(0,0,0,0.1);
+    }
+    .result-btn.hidden { display: none !important; }
+
+    /* アンケートボタン（タイトル左上） */
+    #survey-button {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 14;
+      max-width: 42%;
+      padding: 0;
+      border: none;
+      background: none;
+      text-decoration: none;
+      cursor: pointer;
+      font-family: inherit;
+      -webkit-tap-highlight-color: transparent;
+      display: block;
+    }
+    #survey-button img {
+      width: auto;
+      max-width: 170px;
+      max-height: 44px;
+      height: auto;
+      display: block;
+      filter: drop-shadow(0 3px 6px rgba(0,0,0,0.2));
+    }
+    #survey-button:not(.no-img) .survey-fallback {
+      display: none !important;
+    }
+    #survey-button.no-img {
+      max-width: calc(50% - 20px);
+      padding: 8px 12px;
+      border-radius: 999px;
+      border: 3px solid #1a3a6a;
+      background: linear-gradient(180deg, #fff0f8, #ff9fd0);
+      color: #6a2048;
+      font-size: 11px;
+      font-weight: 900;
+      line-height: 1.25;
+      text-align: center;
+      box-shadow: 0 3px 0 #c05080, 0 4px 10px rgba(0,0,0,0.12);
+    }
+    #survey-button .survey-fallback {
+      display: none;
+    }
+    #survey-button.no-img .survey-fallback {
+      display: inline;
+    }
+    #survey-button:active {
+      transform: translateY(1px);
+      filter: brightness(0.98);
+    }
+
+    #survey-nudge {
+      display: none;
+      position: absolute;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 50;
+      max-width: calc(100% - 24px);
+      background: rgba(255, 255, 255, 0.95);
+      border: 3px solid #1a3a6a;
+      border-radius: 999px;
+      padding: 8px 36px 8px 14px;
+      box-shadow: 0 4px 14px rgba(30, 80, 140, 0.2);
+      align-items: center;
+      gap: 8px;
+    }
+    #survey-nudge.visible {
+      display: flex;
+    }
+    .survey-nudge-img {
+      display: none;
+      height: 36px;
+      width: auto;
+      max-width: 180px;
+      vertical-align: middle;
+    }
+    #survey-nudge.has-img .survey-nudge-img { display: block; }
+    #survey-nudge.has-img .survey-nudge-text { display: none; }
+    .survey-nudge-link {
+      display: inline-flex;
+      align-items: center;
+      color: #6a2048;
+      font-size: 12px;
+      font-weight: 900;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+    .survey-nudge-link:hover { text-decoration: underline; }
+    .survey-nudge-close {
+      display: none !important;
+      position: absolute;
+      right: 6px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 26px;
+      height: 26px;
+      border: none;
+      border-radius: 50%;
+      background: #eee;
+      color: #333;
+      font-size: 16px;
+      line-height: 1;
+      cursor: pointer;
+      font-weight: bold;
+    }
+
+    /* ===== マップ選択レイアウト修正（上書き） ===== */
+    #mode-select-screen {
+      overflow-x: hidden;
+      overflow-y: auto;
+    }
+    .world-shell {
+      display: block !important;
+      width: 100%;
+      max-width: 400px;
+      margin: 0 auto;
+      padding: 0 6px;
+      box-sizing: border-box;
+    }
+    .world-main {
+      display: flex !important;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      width: 100%;
+    }
+    .world-map-row {
+      display: flex !important;
+      flex-direction: row;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      width: 100%;
+    }
+    .world-nav {
+      width: 34px !important;
+      height: 34px !important;
+      min-width: 34px;
+      border-radius: 50% !important;
+      border: 3px solid #fff !important;
+      background: linear-gradient(180deg, #5ec8ff 0%, #1a9aef 100%) !important;
+      color: #fff !important;
+      font-size: 22px !important;
+      font-weight: 900 !important;
+      box-shadow: 0 3px 0 #0a5a9a, 0 4px 8px rgba(0,80,160,0.3) !important;
+      display: flex !important;
+      align-items: center;
+      justify-content: center;
+      padding: 0 !important;
+      flex-shrink: 0;
+      align-self: center !important;
+      position: relative !important;
+      top: auto !important;
+      left: auto !important;
+      right: auto !important;
+      bottom: auto !important;
+      transform: none !important;
+      z-index: 5;
+    }
+    .world-map-viewport {
+      flex: 1 1 auto !important;
+      width: auto !important;
+      min-width: 0 !important;
+      height: 210px !important;
+      min-height: 210px !important;
+      max-height: 210px !important;
+      border-radius: 18px !important;
+      border: 4px solid #fff !important;
+      box-shadow: 0 0 0 2px #3db4ff, 0 6px 14px rgba(20,90,160,0.25) !important;
+      overflow-x: auto !important;
+      overflow-y: hidden !important;
+      -webkit-overflow-scrolling: touch;
+    }
+    .world-map-canvas {
+      width: 640px !important;
+      max-width: none !important;
+      height: 100% !important;
+      min-height: 100% !important;
+      background-size: cover !important;
+      background-position: center !important;
+    }
+    .map-guide-panel {
+      display: flex !important;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-end;
+      width: 100%;
+      max-width: 320px !important;
+      min-height: 0 !important;
+      margin: 6px auto 10px !important;
+      padding: 0 !important;
+      border: none !important;
+      border-radius: 0 !important;
+      background: transparent !important;
+      box-shadow: none !important;
+      z-index: 3;
+      box-sizing: border-box;
+      position: relative;
+    }
+    .map-guide-bg {
+      display: block !important;
+      position: relative !important;
+      inset: auto !important;
+      width: 100% !important;
+      max-width: 320px;
+      height: auto !important;
+      object-fit: contain !important;
+      pointer-events: none;
+      z-index: 0;
+    }
+    .map-guide-panel:not(.has-img-bg) .map-guide-bg {
+      display: none !important;
+    }
+    /* 画像がないときだけ簡易パネル */
+    .map-guide-panel:not(.has-img-bg) {
+      max-width: 280px !important;
+      padding: 10px !important;
+      border: 3px solid #fff !important;
+      border-radius: 16px !important;
+      background: linear-gradient(180deg, rgba(255,255,255,0.95), rgba(230,246,255,0.95)) !important;
+      box-shadow: 0 0 0 2px #5ec8ff, 0 4px 10px rgba(20,90,160,0.18) !important;
+    }
+    .map-guide-top {
+      position: absolute;
+      left: 12%;
+      right: 12%;
+      top: 18%;
+      z-index: 1;
+      min-height: 0;
+      margin: 0;
+    }
+    .map-guide-panel.has-img-bg .map-guide-top {
+      display: none !important;
+    }
+    .map-guide-panel:not(.has-img-bg) .map-guide-top {
+      position: relative;
+      left: auto;
+      right: auto;
+      top: auto;
+    }
+    .world-selected,
+    .world-hint {
+      display: block !important;
+      position: relative;
+      z-index: 1;
+    }
+    .map-guide-panel.has-img-bg .world-selected,
+    .map-guide-panel.has-img-bg .world-hint {
+      display: none !important;
+    }
+    /* 決定・戻るはパネル画像の下に配置 */
+    .world-action {
+      position: relative !important;
+      z-index: 2;
+      margin-top: -8px !important;
+      margin-bottom: 4px !important;
+      padding-top: 0 !important;
+      width: 100%;
+      display: flex !important;
+      justify-content: center;
+      gap: 12px;
+    }
+    .map-guide-panel.has-img-bg .world-action {
+      margin-top: 8px !important;
+    }
+
+
+    .map-guide-char-wrap,
+    .map-guide-char { display: none !important; }
+    .map-guide-top {
+      justify-content: center !important;
+      width: 100%;
+    }
+    .map-guide-texts {
+      text-align: center !important;
+      width: 100%;
+    }
+    .map-guide-panel .world-selected,
+    .map-guide-panel .world-hint {
+      text-align: center !important;
+    }
+    .world-action {
+      margin-top: 16px !important;
+      margin-bottom: 4px !important;
+      padding-top: 8px !important;
+    }
+    .map-guide-panel {
+      padding-bottom: 14px !important;
+      min-height: 110px !important;
+    }
+
+    /* hide guide char */
+  </style>
+</head>
+<body>
+
+  <div id="game-container">
+    <canvas id="gameCanvas"></canvas>
+
+    <div id="countdown-overlay"></div>
+    <div id="countdown-ring"></div>
+    <div id="countdown-display">
+      <div id="countdown-number">3</div>
+      <div id="countdown-sub">GET READY</div>
+    </div>
+
+    <div id="fade-overlay"></div>
+
+    <button id="warp-button" type="button" aria-label="ワープ">
+      <img data-asset="warp_item.png" src="" alt="warp">
+      <span id="warp-count">0</span>
+    </button>
+
+
+    <div id="result-menu">
+      <button type="button" class="result-btn retry" data-action="retry">もう一度プレイ</button>
+      <button type="button" class="result-btn next" data-action="next">次のステージへ</button>
+      <button type="button" class="result-btn prev" data-action="prev">前のステージへ</button>
+      <button type="button" class="result-btn title" data-action="title">タイトルに戻る</button>
+    </div>
+
+    <div id="settings-overlay">
+      <div class="settings-panel">
+        <h2>⚙ 設定</h2>
+        <div class="settings-section">
+          <h3>サウンド</h3>
+          <div class="settings-row">
+            <span>効果音</span>
+            <input type="checkbox" id="set-se-enabled" checked>
+          </div>
+          <div class="settings-row">
+            <span>音量</span>
+            <input type="range" id="set-se-volume" min="0" max="100" value="28">
+          </div>
+        </div>
+        <div class="settings-section">
+          <h3>プレイ統計</h3>
+          <div id="stats-box">
+            <div class="stat-line"><span>総プレイ</span><span id="stat-plays">0</span></div>
+            <div class="stat-line"><span>総走行距離</span><span id="stat-dist">0 m</span></div>
+            <div class="stat-line"><span>クリア数</span><span id="stat-clears">0</span></div>
+            <div class="stat-line"><span>ゲームオーバー</span><span id="stat-deaths">0</span></div>
+            <div class="stat-line"><span>ベストスコア</span><span id="stat-best">0 m</span></div>
+            <div class="stat-line"><span>能力使用</span><span id="stat-abil">-</span></div>
+          </div>
+        </div>
+        <button type="button" class="settings-close" id="settings-close">閉じる</button>
+      </div>
+    </div>
+
+    <div id="ability-choice-overlay">
+      <div class="ability-panel">
+        <div class="ability-title">ABILITY SELECT</div>
+        <div class="ability-sub" id="ability-choice-sub">能力を1つ選んでください</div>
+        <div class="ability-options">
+          <button type="button" class="ability-opt" data-ability="warp">
+            <span class="ability-opt-name">🚀 ワープアイテム ×2</span>
+            <span class="ability-opt-desc">ワープを2個入手（最大3まで）</span>
+          </button>
+          <button type="button" class="ability-opt" data-ability="revive">
+            <span class="ability-opt-name">💖 一度復活</span>
+            <span class="ability-opt-desc">次に死んだとき、1回だけその場で復活</span>
+          </button>
+          <button type="button" class="ability-opt" data-ability="invuln">
+            <span class="ability-opt-name">🛡 数秒間無敵</span>
+            <span class="ability-opt-desc">使ったとき、数秒間ダメージを受けない</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <button id="invuln-button" type="button" aria-label="無敵">
+      <span style="font-size:18px;line-height:1;">🛡</span>
+      <span id="invuln-count">0</span>
+    </button>
+
+    <div id="gravity-warning" class="hidden">
+      ⚠️ GRAVITY REVERSE! ⚠️
+    </div>
+
+    <div id="start-screen">
+      <a id="survey-button" href="https://docs.google.com/forms/d/e/1FAIpQLSesk-IyggxuCbUH_54STbgYozLTFdK__kJhHk88U_pZ952nPw/viewform?usp=publish-editor" target="_blank" rel="noopener noreferrer" aria-label="アンケート回答はこちら">
+        <img id="survey-btn-img" data-asset="btn-survey.png" src="" alt="アンケート回答はこちら">
+        <span class="survey-fallback">📝 アンケート回答はこちら</span>
+      </a>
+      <button id="settings-button" type="button" aria-label="設定">⚙</button>
+      <button id="start-button" class="menu-btn"><img data-asset="btn-start.png" src="" alt="START"></button>
+      <button id="score-attack-button" class="menu-btn" type="button">
+        <img data-asset="btn-score-attack.png" src="" alt="スコアアタック">
+        <span class="img-btn-fallback" style="display:none;color:#00e5ff;font-weight:bold;font-size:13px;letter-spacing:1px;">スコアアタック</span>
+      </button>
+      <a href="ranking.html" id="ranking-button" class="menu-btn"><img data-asset="btn-ranking.png" src="" alt="RANKING"></a>
+      <a href="custom.html" id="custom-button" class="menu-btn"><img data-asset="btn-custom.png" src="" alt="CUSTOM"></a>
+      <a href="howto.html" id="howto-button" class="menu-btn"><img data-asset="btn-howto.png" src="" alt="HOW TO"></a>
+    </div>
+
+    <!-- モード選択画面（ワールドページ式マップ） -->
+    <div id="mode-select-screen">
+      <img class="map-select-bg" data-asset="map_select_bg.png" alt="">
+      <div id="mode-select-title">
+        <img data-asset="map_title.png" alt="STAGE MAP">
+        <span class="text-fallback">STAGE MAP</span>
+      </div>
+      <div id="mode-select-subtitle">
+        <img data-asset="map_subtitle.png" alt="">
+        <span class="text-fallback">ワールドを選んで冒険しよう</span>
+      </div>
+
+      <div class="world-shell">
+        <div class="world-main">
+          <div class="world-banner" id="world-banner">
+            <img class="world-banner-img" id="world-banner-img" data-asset="map_world_banner.png" alt="">
+            <span class="world-tag" id="world-tag">WORLD 1</span>
+            <span class="world-name" id="world-name">草原エリア</span>
+          </div>
+
+          <div class="world-map-row">
+            <button class="world-nav" id="world-prev" type="button" aria-label="前のワールド">‹</button>
+            <div class="world-map-viewport" id="world-map-viewport">
+              <div class="world-map-canvas" id="world-map-canvas" data-main="1">
+                <div class="map-deco-layer" id="map-deco-layer"></div>
+                <svg class="map-path-svg" id="map-path-svg" viewBox="0 0 560 240" preserveAspectRatio="none">
+                  <path id="map-path-line" d="M 70 160 C 140 160, 160 90, 240 100 S 340 170, 420 130 S 500 100, 520 110"
+                    fill="none" stroke="rgba(255,255,255,0.75)" stroke-width="5" stroke-dasharray="12 8"
+                    stroke-linecap="round"/>
+                </svg>
+                <button class="map-spot" data-sub="1" type="button" style="left:12.5%; top:62%;">
+                  <img class="spot-landmark" alt="">
+                  <span class="spot-ring"></span>
+                  <span class="spot-label">1-1</span>
+                  <span class="spot-plate"><span class="plate-title">1-1</span></span>
+                </button>
+                <button class="map-spot" data-sub="2" type="button" style="left:43%; top:38%;">
+                  <img class="spot-landmark" alt="">
+                  <span class="spot-ring"></span>
+                  <span class="spot-label">1-2</span>
+                  <span class="spot-plate"><span class="plate-title">1-2</span></span>
+                </button>
+                <button class="map-spot" data-sub="3" type="button" style="left:78%; top:42%;">
+                  <img class="spot-landmark" alt="">
+                  <span class="spot-ring"></span>
+                  <span class="spot-label">1-3</span>
+                  <span class="spot-plate"><span class="plate-title">1-3</span></span>
+                </button>
+                <img class="map-char" id="map-char" alt="player">
+              </div>
+            </div>
+            <button class="world-nav" id="world-next" type="button" aria-label="次のワールド">›</button>
+          </div>
+
+          <div class="map-guide-panel" id="map-guide-panel">
+            <img class="map-guide-bg" data-asset="map_guide_panel.png" alt="">
+            <div class="map-guide-top">
+              <div class="map-guide-texts">
+                <div class="world-selected" id="world-selected">地点を選んでください</div>
+                <div class="world-hint" id="world-hint">地点を選んで「挑戦する」</div>
+              </div>
+            </div>
+            <div class="world-action">
+              <button class="img-btn challenge-btn" id="challenge-btn" type="button" disabled aria-label="決定">
+                <img data-asset="ui_btn_confirm.png" src="" alt="決定">
+                <span class="img-btn-fallback">決定</span>
+              </button>
+              <button class="img-btn mode-back-img" id="mode-back-btn" type="button" aria-label="戻る">
+                <img data-asset="ui_btn_back.png" src="" alt="戻る">
+                <span class="img-btn-fallback">戻る</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="world-dots" id="world-dots"></div>
+    </div>
+
+  </div>
+
+  <audio id="index-sfx-button" data-asset="sfx_button.mp3" preload="auto"></audio>
+
+<script>
+    function adjustScale() {
+      const container = document.getElementById('game-container');
+      const canvas = document.getElementById('gameCanvas');
+      const designWidth = 400;  
+      const designHeight = 700; 
+      
+      canvas.width = designWidth;
+      canvas.height = designHeight;
+
+      const windowWidth = window.innerWidth;
+      const windowHeight = window.innerHeight;
+      
+      const scaleX = windowWidth / designWidth;
+      const scaleY = windowHeight / designHeight;
+      let scale = Math.min(scaleX, scaleY);
+      
+      if (scale >= 1) {
+        scale = 1;
+      }
+
+      container.style.left = "50%";
+      container.style.top = "50%";
+      container.style.transform = `translate(-50%, -50%) scale(${scale})`;
+    }
+
+    window.addEventListener("load", adjustScale);
+    window.addEventListener("resize", adjustScale);
+
+    // ===== メニュー画面の共通SE =====
+    // game.js のグローバル変数と名前が衝突しないよう、index専用の名前を使用
+    const indexSfxButton = document.getElementById("index-sfx-button");
+
+    function indexIsSeEnabled() {
+      return (localStorage.getItem("drawRunSeEnabled") ?? sessionStorage.getItem("drawRunSeEnabled")) !== "false";
+    }
+
+    function indexGetSeVolume() {
+      const saved = localStorage.getItem("drawRunSeVolume") ?? sessionStorage.getItem("drawRunSeVolume");
+      const value = Number(saved);
+      if (!Number.isFinite(value)) return 0.28;
+      return Math.max(0, Math.min(100, value)) / 100;
+    }
+
+    function indexPlayButtonSfx() {
+      if (!indexSfxButton || !indexIsSeEnabled()) return;
+
+      const volume = indexGetSeVolume();
+      if (volume <= 0) return;
+
+      try {
+        indexSfxButton.volume = volume;
+        indexSfxButton.currentTime = 0;
+        indexSfxButton.play().catch(() => {});
+      } catch (e) {}
+    }
+
+    // スタートボタンは game.js 側で処理するため、ここでは画面遷移する3ボタンだけを処理
+    const indexLinkButtons = document.querySelectorAll("#ranking-button, #custom-button, #howto-button");
+
+    indexLinkButtons.forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.preventDefault();
+
+        indexPlayButtonSfx();
+
+        const targetUrl = btn.href;
+        setTimeout(() => {
+          window.location.href = targetUrl;
+        }, 250);
+      });
+    });
+
+  </script>
+
+  <script src="game.js"></script>
+  <!-- デバッグ用（本番ではこの行を消すか、debug.jsを置かなければ無効） -->
+  <script src="debug.js"></script>
+</body>
+</html>
